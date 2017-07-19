@@ -1,0 +1,19 @@
+language: rust
+sudo: false
+dist: trusty
+cache:
+    apt: true
+    directories:
+        - target/debug/deps
+        - target/debug/build
+
+rust:
+  - stable
+  - beta
+  - nightly
+matrix:
+  allow_failures:
+    - rust: nightly
+script:
+  - cargo build
+  - cargo test
