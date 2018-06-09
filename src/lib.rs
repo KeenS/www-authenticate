@@ -6,7 +6,7 @@ extern crate unicase;
 extern crate url;
 
 use hyper::error::Result;
-use hyper::header::{Header, HeaderFormat};
+use hyper::header::{Formatter, Header, Raw};
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt;
@@ -86,7 +86,6 @@ pub trait Challenge: Clone {
     fn into_raw(self) -> RawChallenge;
 }
 
-
 impl WwwAuthenticate {
     pub fn new<C: Challenge>(c: C) -> Self {
         let mut auth = WwwAuthenticate(HashMap::new());
@@ -104,17 +103,15 @@ impl WwwAuthenticate {
     pub fn get<C: Challenge>(&self) -> Option<Vec<C>> {
         self.0
             .get(&UniCase(CowStr(Cow::Borrowed(C::challenge_name()))))
-            .map(|m| {
-                m.iter().map(Clone::clone).flat_map(C::from_raw).collect()
-            })
+            .map(|m| m.iter().map(Clone::clone).flat_map(C::from_raw).collect())
     }
 
     /// find challenges and return it if found
     pub fn get_raw(&self, name: &str) -> Option<&[RawChallenge]> {
         self.0
-            .get(&UniCase(CowStr(Cow::Borrowed(
-                unsafe { mem::transmute::<&str, &'static str>(name) },
-            ))))
+            .get(&UniCase(CowStr(Cow::Borrowed(unsafe {
+                mem::transmute::<&str, &'static str>(name)
+            }))))
             .map(AsRef::as_ref)
     }
 
@@ -157,12 +154,24 @@ impl WwwAuthenticate {
     }
 }
 
+impl fmt::Display for WwwAuthenticate {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        for (scheme, values) in &self.0 {
+            for value in values.iter() {
+                // tail commas are allowed
+                write!(f, "{} {}, ", scheme, value)?;
+            }
+        }
+        Ok(())
+    }
+}
 
 impl Header for WwwAuthenticate {
     fn header_name() -> &'static str {
         "WWW-Authenticate"
     }
-    fn parse_header(raw: &[Vec<u8>]) -> Result<Self> {
+
+    fn parse_header(raw: &Raw) -> Result<Self> {
         let mut map = HashMap::new();
         for data in raw {
             let stream = parser::Stream::new(data.as_ref());
@@ -182,21 +191,12 @@ impl Header for WwwAuthenticate {
                     .or_insert(Vec::new())
                     .push(challenge);
             }
-
         }
         Ok(WwwAuthenticate(map))
     }
-}
 
-impl HeaderFormat for WwwAuthenticate {
-    fn fmt_header(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        for (scheme, values) in &self.0 {
-            for value in values.iter() {
-                // tail commas are allowed
-                write!(f, "{} {}, ", scheme, value)?;
-            }
-        }
-        Ok(())
+    fn fmt_header(&self, f: &mut Formatter) -> fmt::Result {
+        f.fmt_line(self)
     }
 }
 
@@ -204,9 +204,9 @@ impl HeaderFormat for WwwAuthenticate {
 fn test_www_authenticate_multiple_headers() {
     let input1 = br#"Digest realm="http-auth@example.org", qop="auth, auth-int", algorithm=SHA-256, nonce="7ypf/xlj9XXwfDPEoM4URrv/xwf94BcCAzFZH4GiTo0v", opaque="FQhe/qaU925kfnzjCev0ciny7QMkPqMAFRtzCUYo5tdS""#.to_vec();
     let input2 = br#"Digest realm="http-auth@example.org", qop="auth, auth-int", algorithm=MD5, nonce="7ypf/xlj9XXwfDPEoM4URrv/xwf94BcCAzFZH4GiTo0v", opaque="FQhe/qaU925kfnzjCev0ciny7QMkPqMAFRtzCUYo5tdS""#.to_vec();
-    let input = &[input1, input2];
+    let input = vec![input1, input2];
 
-    let auth = WwwAuthenticate::parse_header(input).unwrap();
+    let auth = WwwAuthenticate::parse_header(&input.into()).unwrap();
     let digests = auth.get::<DigestChallenge>().unwrap();
     assert!(digests.contains(&DigestChallenge {
         realm: Some("http-auth@example.org".into()),
@@ -229,8 +229,6 @@ fn test_www_authenticate_multiple_headers() {
         stale: None,
         userhash: None,
     }));
-
-
 }
 
 macro_rules! try_opt {
@@ -277,7 +275,6 @@ impl AsRef<str> for CowStr {
     }
 }
 
-
 pub use self::raw::*;
 mod raw {
     use super::*;
@@ -316,21 +313,21 @@ mod raw {
         }
         pub fn get(&self, k: &str) -> Option<&String> {
             self.0
-                .get(&UniCase(CowStr(Cow::Borrowed(
-                    unsafe { mem::transmute::<&str, &'static str>(k) },
-                ))))
+                .get(&UniCase(CowStr(Cow::Borrowed(unsafe {
+                    mem::transmute::<&str, &'static str>(k)
+                }))))
                 .map(|&(ref s, _)| s)
         }
         pub fn contains_key(&self, k: &str) -> bool {
-            self.0.contains_key(&UniCase(CowStr(Cow::Borrowed(
-                unsafe { mem::transmute::<&str, &'static str>(k) },
-            ))))
+            self.0.contains_key(&UniCase(CowStr(Cow::Borrowed(unsafe {
+                mem::transmute::<&str, &'static str>(k)
+            }))))
         }
         pub fn get_mut(&mut self, k: &str) -> Option<&mut String> {
             self.0
-                .get_mut(&UniCase(CowStr(Cow::Borrowed(
-                    unsafe { mem::transmute::<&str, &'static str>(k) },
-                ))))
+                .get_mut(&UniCase(CowStr(Cow::Borrowed(unsafe {
+                    mem::transmute::<&str, &'static str>(k)
+                }))))
                 .map(|&mut (ref mut s, _)| s)
         }
         pub fn insert(&mut self, k: String, v: String) -> Option<String> {
@@ -355,9 +352,9 @@ mod raw {
         }
         pub fn remove(&mut self, k: &str) -> Option<String> {
             self.0
-                .remove(&UniCase(CowStr(Cow::Borrowed(
-                    unsafe { mem::transmute::<&str, &'static str>(k) },
-                ))))
+                .remove(&UniCase(CowStr(Cow::Borrowed(unsafe {
+                    mem::transmute::<&str, &'static str>(k)
+                }))))
                 .map(|(s, _)| s)
         }
     }
@@ -384,15 +381,13 @@ mod raw {
             use self::RawChallenge::*;
             match *self {
                 Token68(ref token) => write!(f, "{}", token)?,
-                Fields(ref fields) => {
-                    for (k, &(ref v, ref quote)) in fields.0.iter() {
-                        if need_quote(v, quote) {
-                            write!(f, "{}={:?}, ", k, v)?
-                        } else {
-                            write!(f, "{}={}, ", k, v)?
-                        }
+                Fields(ref fields) => for (k, &(ref v, ref quote)) in fields.0.iter() {
+                    if need_quote(v, quote) {
+                        write!(f, "{}={:?}, ", k, v)?
+                    } else {
+                        write!(f, "{}={}, ", k, v)?
                     }
-                }
+                },
             }
             Ok(())
         }
@@ -450,8 +445,8 @@ mod basic {
 
     #[test]
     fn test_parse_basic() {
-        let input = b"Basic realm=\"secret zone\"".to_vec();
-        let auth = WwwAuthenticate::parse_header(&[input]).unwrap();
+        let input = "Basic realm=\"secret zone\"";
+        let auth = WwwAuthenticate::parse_header(&input.into()).unwrap();
         let mut basics = auth.get::<BasicChallenge>().unwrap();
         assert_eq!(basics.len(), 1);
         let basic = basics.swap_remove(0);
@@ -460,10 +455,12 @@ mod basic {
 
     #[test]
     fn test_roundtrip_basic() {
-        let basic = BasicChallenge { realm: "secret zone".into() };
+        let basic = BasicChallenge {
+            realm: "secret zone".into(),
+        };
         let auth = WwwAuthenticate::new(basic.clone());
-        let data = format!("{}", &auth as &(HeaderFormat + Send + Sync));
-        let auth = WwwAuthenticate::parse_header(&[data.into_bytes()]).unwrap();
+        let data = format!("{}", auth);
+        let auth = WwwAuthenticate::parse_header(&data.into()).unwrap();
         let basic_tripped = auth.get::<BasicChallenge>().unwrap().swap_remove(0);
         assert_eq!(basic, basic_tripped);
     }
@@ -520,7 +517,6 @@ mod digest {
         Other(String),
     }
 
-
     /// Quority of protection
     #[derive(Debug, Clone, PartialEq, Eq, Hash)]
     pub enum Qop {
@@ -529,7 +525,6 @@ mod digest {
         /// authentication with integrity protection
         AuthInt,
     }
-
 
     impl Challenge for DigestChallenge {
         fn challenge_name() -> &'static str {
@@ -620,7 +615,6 @@ mod digest {
                         // pub charset: Option<Charset>,
                         userhash: userhash,
                     })
-
                 }
             }
         }
@@ -646,7 +640,6 @@ mod digest {
                 let len = d.len();
                 d.truncate(len - 1);
                 map.insert_static_quoting("domain", d);
-
             }
             for nonce in self.nonce {
                 map.insert_static_quoting("nonce", nonce);
@@ -689,7 +682,6 @@ mod digest {
         }
     }
 
-
     impl fmt::Display for Qop {
         fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
             use self::Qop::*;
@@ -700,13 +692,10 @@ mod digest {
         }
     }
 
-
-
-
     #[test]
     fn test_parse_digest() {
-        let input = br#"Digest realm="http-auth@example.org", qop="auth, auth-int", algorithm=SHA-256, nonce="7ypf/xlj9XXwfDPEoM4URrv/xwf94BcCAzFZH4GiTo0v", opaque="FQhe/qaU925kfnzjCev0ciny7QMkPqMAFRtzCUYo5tdS""#;
-        let auth = WwwAuthenticate::parse_header(&[input.to_vec()]).unwrap();
+        let input = r#"Digest realm="http-auth@example.org", qop="auth, auth-int", algorithm=SHA-256, nonce="7ypf/xlj9XXwfDPEoM4URrv/xwf94BcCAzFZH4GiTo0v", opaque="FQhe/qaU925kfnzjCev0ciny7QMkPqMAFRtzCUYo5tdS""#;
+        let auth = WwwAuthenticate::parse_header(&input.into()).unwrap();
         let mut digests = auth.get::<DigestChallenge>().unwrap();
         assert_eq!(digests.len(), 1);
         let digest = digests.swap_remove(0);
@@ -739,13 +728,12 @@ mod digest {
             userhash: None,
         };
         let auth = WwwAuthenticate::new(digest.clone());
-        let data = format!("{}", &auth as &(HeaderFormat + Send + Sync));
-        let auth = WwwAuthenticate::parse_header(&[data.into_bytes()]).unwrap();
+        let data = format!("{}", auth);
+        let auth = WwwAuthenticate::parse_header(&data.into()).unwrap();
         let digest_tripped = auth.get::<DigestChallenge>().unwrap().swap_remove(0);
         assert_eq!(digest, digest_tripped);
     }
 }
-
 
 mod parser {
     use super::raw::{ChallengeFields, RawChallenge};
@@ -762,8 +750,7 @@ mod parser {
 
     pub fn is_token_char(c: u8) -> bool {
         // See https://tools.ietf.org/html/rfc7230#section-3.2.6
-        br#"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890!#$%&'*+-.^_`|~"#
-            .contains(&c)
+        br#"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890!#$%&'*+-.^_`|~"#.contains(&c)
     }
 
     pub fn is_obs_text(c: u8) -> bool {
@@ -785,8 +772,6 @@ mod parser {
     pub fn is_quoting(c: u8) -> bool {
         b"\t ".contains(&c) || is_vchar(c) || is_obs_text(c)
     }
-
-
 
     impl<'a> Stream<'a> {
         pub fn new(data: &'a [u8]) -> Self {
@@ -841,12 +826,13 @@ mod parser {
         where
             F: Fn(u8) -> bool,
         {
-            self.take_while(f).and_then(|b| if b.len() < 1 {
-                Err(Error::Header)
-            } else {
-                Ok(b)
+            self.take_while(f).and_then(|b| {
+                if b.len() < 1 {
+                    Err(Error::Header)
+                } else {
+                    Ok(b)
+                }
             })
-
         }
 
         pub fn try<F, T>(&self, f: F) -> Result<T>
@@ -862,7 +848,6 @@ mod parser {
                 }
             }
         }
-
 
         pub fn skip_ws(&self) -> Result<()> {
             self.take_while(is_ws).map(|_| ())
@@ -884,9 +869,8 @@ mod parser {
         }
 
         pub fn token(&self) -> Result<&str> {
-            self.take_while1(is_token_char).map(|s| unsafe {
-                from_utf8_unchecked(s)
-            })
+            self.take_while1(is_token_char)
+                .map(|s| unsafe { from_utf8_unchecked(s) })
         }
 
         pub fn next_token(&self) -> Result<&str> {
@@ -932,7 +916,6 @@ mod parser {
             String::from_utf8(s).map_err(|_| Error::Header)
         }
 
-
         pub fn token68(&self) -> Result<&str> {
             let start = self.pos();
             // See https://tools.ietf.org/html/rfc7235#section-2.1
@@ -960,15 +943,14 @@ mod parser {
         }
 
         pub fn field(&self) -> Result<(String, String)> {
-            self.try(|| {
-                self.kv_token().map(|(k, v)| (k.to_string(), v.to_string()))
-            }).or_else(|_| self.kv_quoted().map(|(k, v)| (k.to_string(), v)))
+            self.try(|| self.kv_token().map(|(k, v)| (k.to_string(), v.to_string())))
+                .or_else(|_| self.kv_quoted().map(|(k, v)| (k.to_string(), v)))
         }
 
         pub fn raw_token68(&self) -> Result<RawChallenge> {
-            let ret = self.token68().map(ToString::to_string).map(
-                RawChallenge::Token68,
-            )?;
+            let ret = self.token68()
+                .map(ToString::to_string)
+                .map(RawChallenge::Token68)?;
             self.skip_field_sep()?;
             Ok(ret)
         }
@@ -998,9 +980,8 @@ mod parser {
         pub fn challenge(&self) -> Result<(String, RawChallenge)> {
             let scheme = self.next_token()?;
             self.take_while1(is_ws)?;
-            let challenge = self.try(|| self.raw_token68()).or_else(
-                |_| self.raw_fields(),
-            )?;
+            let challenge = self.try(|| self.raw_token68())
+                .or_else(|_| self.raw_fields())?;
             Ok((scheme.to_string(), challenge))
         }
     }
@@ -1024,7 +1005,6 @@ mod parser {
         assert_eq!(v, "secret zone\t㊙");
         assert!(stream.is_end());
     }
-
 
     #[test]
     fn test_parese_token_field() {
@@ -1158,8 +1138,6 @@ mod parser {
         }
         assert!(stream.is_end());
     }
-
-
 
     #[test]
     #[should_panic]
