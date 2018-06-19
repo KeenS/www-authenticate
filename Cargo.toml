@@ -1,16 +1,16 @@
 [package]
 authors = ["Sunrin SHIMURA (keen) <3han5chou7@gmail.com>"]
 name = "www-authenticate"
-version = "0.2.0"
+version = "0.3.0"
 license = "MIT"
-description = "missing HTTP WWW-Authenticate header parser/printer for hyper 0.11.x. 0.1.x for hyper 0.10.y and 0.2.x for hyper 0.11.y"
+description = "missing HTTP WWW-Authenticate header parser/printer for hyper 0.11.x. 0.1.x for hyper 0.10.y, 0.2.x for hyper 0.11.y and 0.3.x for hyperx"
 readme = "README.md"
-documentation = "http://docs.rs/www-authenticate/0.1.0/www-authenticate"
+documentation = "http://docs.rs/www-authenticate"
 repository = "https://github.com/KeenS/www-authenticate"
 keywords = ["http", "hyper", "hyperium", "authentication"]
 categories = ["web-programming::http-client", "web-programming::http-server"]
 
 [dependencies]
-hyper = "0.11.0"
+hyperx = "0.13.0"
 unicase = "1.0"
 url = "1.5"

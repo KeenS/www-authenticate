@@ -1,12 +1,12 @@
 //! www-authenticate
 //! missing HTTP WWW-Authenticate header parser/printer for hyper
 
-extern crate hyper;
+extern crate hyperx;
 extern crate unicase;
 extern crate url;
 
-use hyper::error::Result;
-use hyper::header::{Formatter, Header, Raw};
+use hyperx::Result;
+use hyperx::header::{Formatter, Header, Raw};
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt;
@@ -38,9 +38,9 @@ use unicase::UniCase;
 /// # Examples
 ///
 /// ```
-/// # extern crate hyper;
+/// # extern crate hyperx;
 /// # extern crate www_authenticate;
-/// # use hyper::header::Headers;
+/// # use hyperx::header::Headers;
 /// # use www_authenticate::{WwwAuthenticate, DigestChallenge, Qop,
 /// # Algorithm};
 /// # fn main(){
@@ -62,9 +62,9 @@ use unicase::UniCase;
 /// ```
 ///
 /// ```
-/// # extern crate hyper;
+/// # extern crate hyperx;
 /// # extern crate www_authenticate;
-/// # use hyper::header::Headers;
+/// # use hyperx::header::Headers;
 /// # use www_authenticate::{WwwAuthenticate, BasicChallenge};
 /// # fn main(){
 /// let auth = WwwAuthenticate::new(BasicChallenge{realm: "foo".into()});
@@ -232,12 +232,12 @@ fn test_www_authenticate_multiple_headers() {
 }
 
 macro_rules! try_opt {
-    ($e: expr) => {
+    ($e:expr) => {
         match $e {
             Some(e) => e,
-            None => return None
+            None => return None,
         }
-    }
+    };
 }
 
 #[derive(Clone, Hash, Eq, PartialEq, PartialOrd, Ord)]
@@ -396,8 +396,8 @@ mod raw {
 
 pub use self::basic::*;
 mod basic {
-    use super::*;
     use super::raw::RawChallenge;
+    use super::*;
 
     /// The challenge for Basic authentication
     #[derive(Debug, Clone, Eq, PartialEq, Hash)]
@@ -737,7 +737,7 @@ mod digest {
 
 mod parser {
     use super::raw::{ChallengeFields, RawChallenge};
-    use hyper::error::*;
+    use hyperx::{Error, Result};
     use std::cell::Cell;
     use std::str::from_utf8_unchecked;
 
