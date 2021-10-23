@@ -11,6 +11,6 @@ keywords = ["http", "hyper", "hyperium", "authentication"]
 categories = ["web-programming::http-client", "web-programming::http-server"]
 
 [dependencies]
-hyperx = "0.13.0"
+hyperx = { version = "1.3", features = ["headers"] }
 unicase = "1.0"
 url = "1.5"

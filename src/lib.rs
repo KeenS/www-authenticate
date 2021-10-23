@@ -5,8 +5,7 @@ extern crate hyperx;
 extern crate unicase;
 extern crate url;
 
-use hyperx::Result;
-use hyperx::header::{Formatter, Header, Raw};
+use hyperx::header::{Formatter, Header, RawLike};
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt;
@@ -171,9 +170,9 @@ impl Header for WwwAuthenticate {
         "WWW-Authenticate"
     }
 
-    fn parse_header(raw: &Raw) -> Result<Self> {
+    fn parse_header<'a, T>(raw: &'a T) -> hyperx::Result<Self> where T: RawLike<'a> {
         let mut map = HashMap::new();
-        for data in raw {
+        for data in raw.iter() {
             let stream = parser::Stream::new(data.as_ref());
             loop {
                 let (scheme, challenge) = match stream.challenge() {
@@ -198,37 +197,6 @@ impl Header for WwwAuthenticate {
     fn fmt_header(&self, f: &mut Formatter) -> fmt::Result {
         f.fmt_line(self)
     }
-}
-
-#[test]
-fn test_www_authenticate_multiple_headers() {
-    let input1 = br#"Digest realm="http-auth@example.org", qop="auth, auth-int", algorithm=SHA-256, nonce="7ypf/xlj9XXwfDPEoM4URrv/xwf94BcCAzFZH4GiTo0v", opaque="FQhe/qaU925kfnzjCev0ciny7QMkPqMAFRtzCUYo5tdS""#.to_vec();
-    let input2 = br#"Digest realm="http-auth@example.org", qop="auth, auth-int", algorithm=MD5, nonce="7ypf/xlj9XXwfDPEoM4URrv/xwf94BcCAzFZH4GiTo0v", opaque="FQhe/qaU925kfnzjCev0ciny7QMkPqMAFRtzCUYo5tdS""#.to_vec();
-    let input = vec![input1, input2];
-
-    let auth = WwwAuthenticate::parse_header(&input.into()).unwrap();
-    let digests = auth.get::<DigestChallenge>().unwrap();
-    assert!(digests.contains(&DigestChallenge {
-        realm: Some("http-auth@example.org".into()),
-        qop: Some(vec![Qop::Auth, Qop::AuthInt]),
-        algorithm: Some(Algorithm::Sha256),
-        nonce: Some("7ypf/xlj9XXwfDPEoM4URrv/xwf94BcCAzFZH4GiTo0v".into()),
-        opaque: Some("FQhe/qaU925kfnzjCev0ciny7QMkPqMAFRtzCUYo5tdS".into()),
-        domain: None,
-        stale: None,
-        userhash: None,
-    }));
-
-    assert!(digests.contains(&DigestChallenge {
-        realm: Some("http-auth@example.org".into()),
-        qop: Some(vec![Qop::Auth, Qop::AuthInt]),
-        algorithm: Some(Algorithm::Md5),
-        nonce: Some("7ypf/xlj9XXwfDPEoM4URrv/xwf94BcCAzFZH4GiTo0v".into()),
-        opaque: Some("FQhe/qaU925kfnzjCev0ciny7QMkPqMAFRtzCUYo5tdS".into()),
-        domain: None,
-        stale: None,
-        userhash: None,
-    }));
 }
 
 macro_rules! try_opt {
@@ -443,26 +411,32 @@ mod basic {
         }
     }
 
-    #[test]
-    fn test_parse_basic() {
-        let input = "Basic realm=\"secret zone\"";
-        let auth = WwwAuthenticate::parse_header(&input.into()).unwrap();
-        let mut basics = auth.get::<BasicChallenge>().unwrap();
-        assert_eq!(basics.len(), 1);
-        let basic = basics.swap_remove(0);
-        assert_eq!(basic.realm, "secret zone")
-    }
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use hyperx::header::Raw;
 
-    #[test]
-    fn test_roundtrip_basic() {
-        let basic = BasicChallenge {
-            realm: "secret zone".into(),
-        };
-        let auth = WwwAuthenticate::new(basic.clone());
-        let data = format!("{}", auth);
-        let auth = WwwAuthenticate::parse_header(&data.into()).unwrap();
-        let basic_tripped = auth.get::<BasicChallenge>().unwrap().swap_remove(0);
-        assert_eq!(basic, basic_tripped);
+        #[test]
+        fn test_parse_basic() {
+            let input = "Basic realm=\"secret zone\"";
+            let auth = WwwAuthenticate::parse_header(&Raw::from(input)).unwrap();
+            let mut basics = auth.get::<BasicChallenge>().unwrap();
+            assert_eq!(basics.len(), 1);
+            let basic = basics.swap_remove(0);
+            assert_eq!(basic.realm, "secret zone")
+        }
+
+        #[test]
+        fn test_roundtrip_basic() {
+            let basic = BasicChallenge {
+                realm: "secret zone".into(),
+            };
+            let auth = WwwAuthenticate::new(basic.clone());
+            let data = format!("{}", auth);
+            let auth = WwwAuthenticate::parse_header(&Raw::from(data)).unwrap();
+            let basic_tripped = auth.get::<BasicChallenge>().unwrap().swap_remove(0);
+            assert_eq!(basic, basic_tripped);
+        }
     }
 }
 
@@ -692,46 +666,52 @@ mod digest {
         }
     }
 
-    #[test]
-    fn test_parse_digest() {
-        let input = r#"Digest realm="http-auth@example.org", qop="auth, auth-int", algorithm=SHA-256, nonce="7ypf/xlj9XXwfDPEoM4URrv/xwf94BcCAzFZH4GiTo0v", opaque="FQhe/qaU925kfnzjCev0ciny7QMkPqMAFRtzCUYo5tdS""#;
-        let auth = WwwAuthenticate::parse_header(&input.into()).unwrap();
-        let mut digests = auth.get::<DigestChallenge>().unwrap();
-        assert_eq!(digests.len(), 1);
-        let digest = digests.swap_remove(0);
-        assert_eq!(digest.realm, Some("http-auth@example.org".into()));
-        assert_eq!(digest.domain, None);
-        assert_eq!(
-            digest.nonce,
-            Some("7ypf/xlj9XXwfDPEoM4URrv/xwf94BcCAzFZH4GiTo0v".into())
-        );
-        assert_eq!(
-            digest.opaque,
-            Some("FQhe/qaU925kfnzjCev0ciny7QMkPqMAFRtzCUYo5tdS".into())
-        );
-        assert_eq!(digest.stale, None);
-        assert_eq!(digest.algorithm, Some(Algorithm::Sha256));
-        assert_eq!(digest.qop, Some(vec![Qop::Auth, Qop::AuthInt]));
-        assert_eq!(digest.userhash, None);
-    }
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use hyperx::header::Raw;
 
-    #[test]
-    fn test_roundtrip_digest() {
-        let digest = DigestChallenge {
-            realm: Some("http-auth@example.org".into()),
-            domain: None,
-            nonce: Some("7ypf/xlj9XXwfDPEoM4URrv/xwf94BcCAzFZH4GiTo0v".into()),
-            opaque: Some("FQhe/qaU925kfnzjCev0ciny7QMkPqMAFRtzCUYo5tdS".into()),
-            stale: None,
-            algorithm: Some(Algorithm::Sha256),
-            qop: Some(vec![Qop::Auth, Qop::AuthInt]),
-            userhash: None,
-        };
-        let auth = WwwAuthenticate::new(digest.clone());
-        let data = format!("{}", auth);
-        let auth = WwwAuthenticate::parse_header(&data.into()).unwrap();
-        let digest_tripped = auth.get::<DigestChallenge>().unwrap().swap_remove(0);
-        assert_eq!(digest, digest_tripped);
+        #[test]
+        fn test_parse_digest() {
+            let input = r#"Digest realm="http-auth@example.org", qop="auth, auth-int", algorithm=SHA-256, nonce="7ypf/xlj9XXwfDPEoM4URrv/xwf94BcCAzFZH4GiTo0v", opaque="FQhe/qaU925kfnzjCev0ciny7QMkPqMAFRtzCUYo5tdS""#;
+            let auth = WwwAuthenticate::parse_header(&Raw::from(input)).unwrap();
+            let mut digests = auth.get::<DigestChallenge>().unwrap();
+            assert_eq!(digests.len(), 1);
+            let digest = digests.swap_remove(0);
+            assert_eq!(digest.realm, Some("http-auth@example.org".into()));
+            assert_eq!(digest.domain, None);
+            assert_eq!(
+                digest.nonce,
+                Some("7ypf/xlj9XXwfDPEoM4URrv/xwf94BcCAzFZH4GiTo0v".into())
+            );
+            assert_eq!(
+                digest.opaque,
+                Some("FQhe/qaU925kfnzjCev0ciny7QMkPqMAFRtzCUYo5tdS".into())
+            );
+            assert_eq!(digest.stale, None);
+            assert_eq!(digest.algorithm, Some(Algorithm::Sha256));
+            assert_eq!(digest.qop, Some(vec![Qop::Auth, Qop::AuthInt]));
+            assert_eq!(digest.userhash, None);
+        }
+
+        #[test]
+        fn test_roundtrip_digest() {
+            let digest = DigestChallenge {
+                realm: Some("http-auth@example.org".into()),
+                domain: None,
+                nonce: Some("7ypf/xlj9XXwfDPEoM4URrv/xwf94BcCAzFZH4GiTo0v".into()),
+                opaque: Some("FQhe/qaU925kfnzjCev0ciny7QMkPqMAFRtzCUYo5tdS".into()),
+                stale: None,
+                algorithm: Some(Algorithm::Sha256),
+                qop: Some(vec![Qop::Auth, Qop::AuthInt]),
+                userhash: None,
+            };
+            let auth = WwwAuthenticate::new(digest.clone());
+            let data = format!("{}", auth);
+            let auth = WwwAuthenticate::parse_header(&Raw::from(data)).unwrap();
+            let digest_tripped = auth.get::<DigestChallenge>().unwrap().swap_remove(0);
+            assert_eq!(digest, digest_tripped);
+        }
     }
 }
 
@@ -1146,4 +1126,44 @@ mod parser {
         let stream = Stream::new(b);
         println!("{:?}", stream.challenge().unwrap());
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use hyperx::header::Raw;
+
+    #[test]
+    fn test_www_authenticate_multiple_headers() {
+        let input1 = br#"Digest realm="http-auth@example.org", qop="auth, auth-int", algorithm=SHA-256, nonce="7ypf/xlj9XXwfDPEoM4URrv/xwf94BcCAzFZH4GiTo0v", opaque="FQhe/qaU925kfnzjCev0ciny7QMkPqMAFRtzCUYo5tdS""#.to_vec();
+        let input2 = br#"Digest realm="http-auth@example.org", qop="auth, auth-int", algorithm=MD5, nonce="7ypf/xlj9XXwfDPEoM4URrv/xwf94BcCAzFZH4GiTo0v", opaque="FQhe/qaU925kfnzjCev0ciny7QMkPqMAFRtzCUYo5tdS""#.to_vec();
+        let input = Raw::from(vec![input1, input2]);
+
+        let auth = WwwAuthenticate::parse_header(&input).unwrap();
+        let digests = auth.get::<DigestChallenge>().unwrap();
+        assert!(digests.contains(&DigestChallenge {
+            realm: Some("http-auth@example.org".into()),
+            qop: Some(vec![Qop::Auth, Qop::AuthInt]),
+            algorithm: Some(Algorithm::Sha256),
+            nonce: Some("7ypf/xlj9XXwfDPEoM4URrv/xwf94BcCAzFZH4GiTo0v".into()),
+            opaque: Some("FQhe/qaU925kfnzjCev0ciny7QMkPqMAFRtzCUYo5tdS".into()),
+            domain: None,
+            stale: None,
+            userhash: None,
+        }));
+
+        assert!(digests.contains(&DigestChallenge {
+            realm: Some("http-auth@example.org".into()),
+            qop: Some(vec![Qop::Auth, Qop::AuthInt]),
+            algorithm: Some(Algorithm::Md5),
+            nonce: Some("7ypf/xlj9XXwfDPEoM4URrv/xwf94BcCAzFZH4GiTo0v".into()),
+            opaque: Some("FQhe/qaU925kfnzjCev0ciny7QMkPqMAFRtzCUYo5tdS".into()),
+            domain: None,
+            stale: None,
+            userhash: None,
+        }));
+    }
+
+
 }
