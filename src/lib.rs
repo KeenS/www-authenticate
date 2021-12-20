@@ -135,7 +135,7 @@ impl WwwAuthenticate {
     pub fn append<C: Challenge>(&mut self, c: C) {
         self.0
             .entry(UniCase(CowStr(Cow::Borrowed(C::challenge_name()))))
-            .or_insert(Vec::new())
+            .or_insert_with(Vec::new)
             .push(c.into_raw())
     }
 
@@ -143,7 +143,7 @@ impl WwwAuthenticate {
     pub fn append_raw(&mut self, scheme: String, raw: RawChallenge) {
         self.0
             .entry(UniCase(CowStr(Cow::Owned(scheme))))
-            .or_insert(Vec::new())
+            .or_insert_with(Vec::new)
             .push(raw)
     }
 
@@ -170,10 +170,13 @@ impl Header for WwwAuthenticate {
         "WWW-Authenticate"
     }
 
-    fn parse_header<'a, T>(raw: &'a T) -> hyperx::Result<Self> where T: RawLike<'a> {
+    fn parse_header<'a, T>(raw: &'a T) -> hyperx::Result<Self>
+    where
+        T: RawLike<'a>,
+    {
         let mut map = HashMap::new();
         for data in raw.iter() {
-            let stream = parser::Stream::new(data.as_ref());
+            let stream = parser::Stream::new(data);
             loop {
                 let (scheme, challenge) = match stream.challenge() {
                     Ok(v) => v,
@@ -187,7 +190,7 @@ impl Header for WwwAuthenticate {
                 };
                 // TODO: treat the cases when a scheme is duplicated
                 map.entry(UniCase(CowStr(Cow::Owned(scheme))))
-                    .or_insert(Vec::new())
+                    .or_insert_with(Vec::new)
                     .push(challenge);
             }
         }
@@ -259,6 +262,12 @@ mod raw {
     /// A representation of the challenge fields
     #[derive(Debug, Clone, PartialEq, Eq)]
     pub struct ChallengeFields(HashMap<UniCase<CowStr>, (String, Quote)>);
+
+    impl Default for ChallengeFields {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
 
     impl ChallengeFields {
         pub fn new() -> Self {
@@ -349,13 +358,15 @@ mod raw {
             use self::RawChallenge::*;
             match *self {
                 Token68(ref token) => write!(f, "{}", token)?,
-                Fields(ref fields) => for (k, &(ref v, ref quote)) in fields.0.iter() {
-                    if need_quote(v, quote) {
-                        write!(f, "{}={:?}, ", k, v)?
-                    } else {
-                        write!(f, "{}={}, ", k, v)?
+                Fields(ref fields) => {
+                    for (k, &(ref v, ref quote)) in fields.0.iter() {
+                        if need_quote(v, quote) {
+                            write!(f, "{}={:?}, ", k, v)?
+                        } else {
+                            write!(f, "{}={}, ", k, v)?
+                        }
                     }
-                },
+                }
             }
             Ok(())
         }
@@ -382,25 +393,22 @@ mod basic {
         fn from_raw(raw: RawChallenge) -> Option<Self> {
             use self::RawChallenge::*;
             match raw {
-                Token68(_) => return None,
+                Token68(_) => None,
                 Fields(mut map) => {
                     let realm = try_opt!(map.remove("realm"));
                     // only "UTF-8" is allowed.
                     // See https://tools.ietf.org/html/rfc7617#section-2.1
-                    match map.remove("charset") {
-                        Some(c) => {
-                            if UniCase(&c) == UniCase("UTF-8") {
-                                ()
-                            } else {
-                                return None;
-                            }
+                    if let Some(c) = map.remove("charset") {
+                        if UniCase(&c) == UniCase("UTF-8") {
+                        } else {
+                            return None;
                         }
-                        None => (),
                     }
+
                     if !map.is_empty() {
                         return None;
                     }
-                    Some(BasicChallenge { realm: realm })
+                    Some(BasicChallenge { realm })
                 }
             }
         }
@@ -507,7 +515,7 @@ mod digest {
         fn from_raw(raw: RawChallenge) -> Option<Self> {
             use self::RawChallenge::*;
             match raw {
-                Token68(_) => return None,
+                Token68(_) => None,
                 Fields(mut map) => {
                     let realm = map.remove("realm");
                     let domains = map.remove("domain");
@@ -541,7 +549,7 @@ mod digest {
                             "SHA-256-sess" => return Sha256Sess,
                             _ => (),
                         };
-                        return Other(a);
+                        Other(a)
                     });
                     let qop = match qop {
                         None => None,
@@ -562,15 +570,11 @@ mod digest {
                             Some(v)
                         }
                     };
-                    match charset {
-                        Some(c) => {
-                            if UniCase(&c) == UniCase("UTF-8") {
-                                ()
-                            } else {
-                                return None;
-                            }
+                    if let Some(c) = charset {
+                        if UniCase(&c) == UniCase("UTF-8") {
+                        } else {
+                            return None;
                         }
-                        None => (),
                     }
 
                     let userhash = userhash.and_then(|u| match u.as_str() {
@@ -579,15 +583,15 @@ mod digest {
                         _ => None,
                     });
                     Some(DigestChallenge {
-                        realm: realm,
+                        realm,
                         domain: domains,
-                        nonce: nonce,
-                        opaque: opaque,
-                        stale: stale,
-                        algorithm: algorithm,
-                        qop: qop,
+                        nonce,
+                        opaque,
+                        stale,
+                        algorithm,
+                        qop,
                         // pub charset: Option<Charset>,
-                        userhash: userhash,
+                        userhash,
                     })
                 }
             }
@@ -604,37 +608,37 @@ mod digest {
             // > For historical reasons, a sender MUST NOT generate the quoted string
             // > syntax values for the following parameters: stale and algorithm.
 
-            for realm in self.realm {
+            if let Some(realm) = self.realm {
                 map.insert_static_quoting("realm", realm);
             }
 
-            for domain in self.domain {
+            if let Some(domain) = self.domain {
                 let mut d = String::new();
                 d.extend(domain.into_iter().map(Url::into_string).map(|s| s + " "));
                 let len = d.len();
                 d.truncate(len - 1);
                 map.insert_static_quoting("domain", d);
             }
-            for nonce in self.nonce {
+            if let Some(nonce) = self.nonce {
                 map.insert_static_quoting("nonce", nonce);
             }
-            for opaque in self.opaque {
+            if let Some(opaque) = self.opaque {
                 map.insert_static_quoting("opaque", opaque);
             }
-            for stale in self.stale {
+            if let Some(stale) = self.stale {
                 map.insert_static("stale", format!("{}", stale));
             }
-            for algorithm in self.algorithm {
+            if let Some(algorithm) = self.algorithm {
                 map.insert_static("algorithm", format!("{}", algorithm));
             }
-            for qop in self.qop {
+            if let Some(qop) = self.qop {
                 let mut q = String::new();
                 q.extend(qop.into_iter().map(|q| format!("{}", q)).map(|s| s + ", "));
                 let len = q.len();
                 q.truncate(len - 2);
                 map.insert_static_quoting("qop", q);
             }
-            for userhash in self.userhash {
+            if let Some(userhash) = self.userhash {
                 map.insert_static("userhash", format!("{}", userhash));
             }
             RawChallenge::Fields(map)
@@ -730,7 +734,8 @@ mod parser {
 
     pub fn is_token_char(c: u8) -> bool {
         // See https://tools.ietf.org/html/rfc7230#section-3.2.6
-        br#"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890!#$%&'*+-.^_`|~"#.contains(&c)
+        br#"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890!#$%&'*+-.^_`|~"#
+            .contains(&c)
     }
 
     pub fn is_obs_text(c: u8) -> bool {
@@ -741,12 +746,12 @@ mod parser {
 
     pub fn is_vchar(c: u8) -> bool {
         // consult the ASCII definition
-        0x21 <= c && c <= 0x7E
+        (0x21..=0x7E).contains(&c)
     }
 
     pub fn is_qdtext(c: u8) -> bool {
         // See https://tools.ietf.org/html/rfc7230#section-3.2.6
-        b"\t \x21".contains(&c) || (0x23 <= c && c <= 0x5B) || (0x5D <= 0x7E) || is_obs_text(c)
+        b"\t \x21".contains(&c) || (0x23..=0x5B).contains(&c) || (0x5D <= 0x7E) || is_obs_text(c)
     }
 
     pub fn is_quoting(c: u8) -> bool {
@@ -807,7 +812,7 @@ mod parser {
             F: Fn(u8) -> bool,
         {
             self.take_while(f).and_then(|b| {
-                if b.len() < 1 {
+                if b.is_empty() {
                     Err(Error::Header)
                 } else {
                     Ok(b)
@@ -815,7 +820,7 @@ mod parser {
             })
         }
 
-        pub fn try<F, T>(&self, f: F) -> Result<T>
+        pub fn r#try<F, T>(&self, f: F) -> Result<T>
         where
             F: FnOnce() -> Result<T>,
         {
@@ -878,13 +883,11 @@ mod parser {
                     } else {
                         return Err(Error::Header);
                     }
+                } else if is_qdtext(self.cur()) {
+                    s.push(self.cur());
+                    self.inc(1);
                 } else {
-                    if is_qdtext(self.cur()) {
-                        s.push(self.cur());
-                        self.inc(1);
-                    } else {
-                        return Err(Error::Header);
-                    }
+                    return Err(Error::Header);
                 }
             }
             if self.is_end() {
@@ -923,12 +926,13 @@ mod parser {
         }
 
         pub fn field(&self) -> Result<(String, String)> {
-            self.try(|| self.kv_token().map(|(k, v)| (k.to_string(), v.to_string())))
+            self.r#try(|| self.kv_token().map(|(k, v)| (k.to_string(), v.to_string())))
                 .or_else(|_| self.kv_quoted().map(|(k, v)| (k.to_string(), v)))
         }
 
         pub fn raw_token68(&self) -> Result<RawChallenge> {
-            let ret = self.token68()
+            let ret = self
+                .token68()
                 .map(ToString::to_string)
                 .map(RawChallenge::Token68)?;
             self.skip_field_sep()?;
@@ -938,7 +942,7 @@ mod parser {
         pub fn raw_fields(&self) -> Result<RawChallenge> {
             let mut map = ChallengeFields::new();
             loop {
-                match self.try(|| self.field()) {
+                match self.r#try(|| self.field()) {
                     Err(_) => return Ok(RawChallenge::Fields(map)),
                     Ok((k, v)) => {
                         if self.skip_field_sep().is_ok() {
@@ -960,7 +964,8 @@ mod parser {
         pub fn challenge(&self) -> Result<(String, RawChallenge)> {
             let scheme = self.next_token()?;
             self.take_while1(is_ws)?;
-            let challenge = self.try(|| self.raw_token68())
+            let challenge = self
+                .r#try(|| self.raw_token68())
                 .or_else(|_| self.raw_fields())?;
             Ok((scheme.to_string(), challenge))
         }
@@ -1164,6 +1169,4 @@ mod tests {
             userhash: None,
         }));
     }
-
-
 }
