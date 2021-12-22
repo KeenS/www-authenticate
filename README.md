@@ -4,7 +4,7 @@
 [![crates.io](http://meritbadge.herokuapp.com/www-authenticate)](https://crates.io/crates/www-authenticate)
 
 missing HTTP WWW-Authenticate header parser/printer for hyper/hyperx.
-0.1.x for hyper 0.10.y and 0.2.x, hyper 0.11.y and 0.3.x for [hyperx](https://github.com/dekellum/hyperx)
+0.1.x for hyper 0.10.y and 0.2.x, hyper 0.11.y and 0.3.x for [hyperx](https://github.com/dekellum/hyperx), 0.4.x for hyperx 0.13.0
 
 # Documentation
 

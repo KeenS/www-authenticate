@@ -1,7 +1,7 @@
 [package]
 authors = ["Sunrin SHIMURA (keen) <3han5chou7@gmail.com>"]
 name = "www-authenticate"
-version = "0.3.0"
+version = "0.4.0"
 license = "MIT"
 description = "missing HTTP WWW-Authenticate header parser/printer for hyper 0.11.x. 0.1.x for hyper 0.10.y, 0.2.x for hyper 0.11.y and 0.3.x for hyperx"
 readme = "README.md"
